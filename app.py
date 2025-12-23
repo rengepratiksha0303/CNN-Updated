@@ -1,55 +1,58 @@
+import streamlit as st
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
-import cv2
-import os
+import pickle
+from PIL import Image
 
-app = Flask(__name__)
+# Page config
+st.set_page_config(
+    page_title="German Traffic Sign Recognition",
+    layout="centered"
+)
 
-# Load trained model
-MODEL_PATH = "model.h5"
-model = load_model(MODEL_PATH)
+st.title("🚦 German Traffic Sign Recognition System")
+st.write("Upload a traffic sign image to get the prediction")
 
-# Load class labels
+# Load model
+@st.cache_resource
+def load_model():
+    with open("model_comparison_results.pkl", "rb") as f:
+        model = pickle.load(f)
+    return model
+
+model = load_model()
+
+# Load labels
 labels = pd.read_csv("labels.csv")
 class_names = labels["Name"].values
 
 IMG_SIZE = 32
 
-def preprocess_image(img_path):
-    img = cv2.imread(img_path)
-    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+def preprocess_image(img):
+    img = img.resize((IMG_SIZE, IMG_SIZE))
+    img = np.array(img)
     img = img / 255.0
-    img = np.expand_dims(img, axis=0)
+    img = img.flatten()          # IMPORTANT for sklearn
+    img = img.reshape(1, -1)     # (1, features)
     return img
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    prediction = None
-    confidence = None
-    image_path = None
+uploaded_file = st.file_uploader(
+    "Upload Traffic Sign Image",
+    type=["jpg", "jpeg", "png"]
+)
 
-    if request.method == "POST":
-        file = request.files["file"]
-        if file:
-            image_path = os.path.join("static", file.filename)
-            file.save(image_path)
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", width=250)
 
-            img = preprocess_image(image_path)
-            preds = model.predict(img)
-            class_id = np.argmax(preds)
-            prediction = class_names[class_id]
-            confidence = round(float(np.max(preds)) * 100, 2)
+    img = preprocess_image(image)
 
-    return render_template(
-        "index.html",
-        prediction=prediction,
-        confidence=confidence,
-        image_path=image_path
-    )
+    prediction = model.predict(img)
+    class_id = int(prediction[0])
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    # Confidence (if supported)
+    if hasattr(model, "predict_proba"):
+        confidence = np.max(model.predict_proba(img)) * 100
+        st.info(f"**Confidence:** {confidence:.2f}%")
+
+    st.success(f"**Prediction:** {class_names[class_id]}")
